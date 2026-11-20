@@ -1,0 +1,44 @@
+/* Solara Bay — menu and overlay styling. System fonts only; nothing loads over the network. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #101018; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #f2f2f5; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+#stage { position: relative; width: min(100vw, 177.78vh); aspect-ratio: 16 / 9; }
+#game { width: 100%; height: 100%; display: block; background: #0c0c12; }
+.overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 8, 16, 0.55); z-index: 10;
+}
+.hidden { display: none !important; }
+.panel {
+  background: rgba(16, 16, 26, 0.92);
+  border: 1px solid rgba(255, 210, 62, 0.35);
+  border-radius: 16px; padding: 34px 40px; max-width: 620px; width: 88%;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6); text-align: center;
+}
+h1 {
+  font-size: 64px; letter-spacing: 4px; line-height: 1;
+  background: linear-gradient(180deg, #ffd23e 15%, #ff7a2d 60%, #e84a7a 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 4px 24px rgba(255, 122, 45, 0.25);
+}
+h2 { font-size: 34px; letter-spacing: 2px; color: #ffd23e; margin-bottom: 10px; }
+.tagline { color: #ffb199; letter-spacing: 5px; text-transform: uppercase; font-size: 13px; margin: 8px 0 18px; }
+.story { color: #d8d8e2; font-size: 15px; line-height: 1.55; margin: 10px 0 18px; }
+.reward { color: #7ee787; font-weight: 700; font-size: 17px; margin-bottom: 6px; }
+.fine { color: #8a8a9a; font-size: 12px; line-height: 1.5; margin-top: 16px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 6px; }
+button {
+  font: inherit; font-weight: 700; font-size: 15px; color: #181822;
+  background: #e8e8f0; border: none; border-radius: 10px;
+  padding: 12px 22px; cursor: pointer; transition: transform 0.08s, background 0.15s;
+}
+button:hover { background: #fff; transform: translateY(-1px); }
+button.primary { background: linear-gradient(180deg, #ffd23e, #ff9a2d); }
+button.primary:hover { background: linear-gradient(180deg, #ffe066, #ffb14d); }
+.controls { margin: 6px auto 14px; border-collapse: collapse; text-align: left; }
+.controls td { padding: 5px 14px; font-size: 14px; color: #d8d8e2; }
+.controls td:first-child { color: #ffd23e; font-weight: 700; white-space: nowrap; }
