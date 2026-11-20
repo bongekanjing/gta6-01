@@ -1,87 +1,89 @@
-// Solara Bay — screenshot staging: ?shot=chase|city|mission|combat (plus ?seed=N)
-// puts the game into a deterministic, readable scene for the 4 screenshots.
-// The game keeps running live after staging, so traffic and police are mid-action.
-import { CAR_TYPES } from './config.js';
-import { Car } from './entities.js';
+// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward
+// from a fresh world for a fixed number of steps, steered by a simple autopilot (drive toward
+// the mission waypoint on the roads, steer around buildings), so the frame is what a short
+// game really looks like and the same seed always gives the same frame.
+import { STEP } from './config.js';
+import { EVENT_BUSTED, EVENT_WASTED } from './world.js';
+import { SCREEN_BUSTED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WASTED } from './render.js';
 
-function placeCar(game, type, x, y, angle, driver) {
-  const def = CAR_TYPES[type];
-  const car = new Car(type, x, y, angle, def.colors[0]);
-  car.driver = driver;
-  car.speed = driver === 'traffic' ? def.top * 0.4 : 0;
-  game.cars.push(car);
-  return car;
-}
+const START_SECONDS = 6;
+const PLAY_SECONDS = 40;
+const END_SECONDS = 90;
 
-function clearTraffic(game) {
-  game.cars = game.cars.filter((c) => c.driver === 'player' || c.driver === 'police');
-  game.peds = [];
-}
-
-export function stageShot(game, shot) {
-  const p = game.player;
-  game.state = 'playing';
-  game.shotMode = true; // freeze the ambient population for a readable frame
-  game.hideAllOverlays();
-  game.audio.setMuted(true);
-  if (shot === 'chase') {
-    // Cover: a police chase on the main avenue — wanted 3, minimap, mission HUD.
-    game.missions.start(2); // Hot Pursuit
-    game.setWanted(3);
-    game.autopilot = true; // the staged car drives itself down the avenue
-    const car = placeCar(game, 'sport', 1400, 1000, 0, 'player');
-    game.enterCar(car, true);
-    car.speed = 380;
-    // Three interceptors in pursuit behind the player, eastbound on the avenue.
-    placeCar(game, 'police', 1120, 1000, 0, 'police').speed = 380;
-    placeCar(game, 'police', 1030, 1010, 0, 'police').speed = 360;
-    placeCar(game, 'police', 950, 990, 0, 'police').speed = 340;
-    placeCar(game, 'sedan', 1680, 1000, 0, 'traffic');
-    placeCar(game, 'taxi', 1180, 1000, Math.PI, 'traffic');
-    p.money = 1250;
-  } else if (shot === 'city') {
-    // Daytime city: driving in traffic with pedestrians on the sidewalks.
-    game.missions.start(0); // Wheels
-    game.missions.step = 1; // already has a car — drive to the paint shop
-    game.autopilot = true;
-    const car = placeCar(game, 'sedan', 1000, 600, 0, 'player');
-    game.enterCar(car, true);
-    car.speed = 240;
-    placeCar(game, 'taxi', 1240, 600, 0, 'traffic');
-    placeCar(game, 'van', 800, 600, Math.PI, 'traffic');
-    placeCar(game, 'sport', 1400, 620, 0, 'traffic');
-    placeCar(game, 'truck', 600, 1000, Math.PI / 2, 'traffic');
-    game.spawnPedsNear(1000, 600, 10);
-    p.money = 750;
-  } else if (shot === 'mission') {
-    // Mission in progress: on foot at the docks, package marker glowing.
-    clearTraffic(game);
-    game.missions.start(1); // The Pickup
-    game.missions.step = 1; // at the docks, collect the package
-    p.x = 2880; p.y = 980; p.angle = Math.PI / 4; // close to the marker, DOCKS in frame
-    p.money = 1750;
-    placeCar(game, 'van', 2960, 1080, Math.PI / 2, null);
-    placeCar(game, 'sedan', 2760, 1060, 0, null);
-    game.spawnPedsNear(2860, 960, 3);
-  } else if (shot === 'combat') {
-    // Warehouse payback: pistol out, thugs spread ahead, wanted 2, health showing.
-    clearTraffic(game);
-    game.missions.start(3); // Payback (spawns its 4 thugs)
-    game.missions.step = 1; // defeat the Vultures
-    // Spread the thugs in an arc ahead of the player so each one reads.
-    const spots = [[1080, 1740], [1120, 1800], [1040, 1860], [1160, 1760]];
-    game.thugs.forEach((t, i) => { t.x = spots[i][0]; t.y = spots[i][1]; });
-    p.x = 940; p.y = 1760; p.angle = 0;
-    p.health = 72; p.ammo = 24; p.weapon = 'pistol';
-    p.money = 3750;
-    game.setWanted(2);
-    placeCar(game, 'police', 1350, 2000, -Math.PI / 2, 'police').speed = 200;
+/** Autopilot controls: drive toward the mission target, on foot walk to the nearest car. */
+function autopilot(state) {
+  const p = state.player;
+  const m = state.mission;
+  const tx = m && m.targetX !== undefined ? m.targetX : 1600;
+  const ty = m && m.targetY !== undefined ? m.targetY : 1600;
+  const controls = {
+    mx: 0, my: 0, throttle: 0, steer: 0, sprint: false,
+    firing: false, interact: false, aimX: p.x + 100, aimY: p.y,
+  };
+  if (p.car) {
+    const targetAngle = Math.atan2(ty - p.y, tx - p.x);
+    let d = targetAngle - p.angle;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    controls.throttle = 1;
+    controls.steer = Math.max(-1, Math.min(1, d * 1.6));
   } else {
-    // Default: free roam at the safehouse.
-    p.x = 420; p.y = 420;
+    // Walk to the nearest car, then get in.
+    let best = null;
+    let bestD = 1e9;
+    for (const car of state.cars) {
+      if (car.driven || car.wrecked) continue;
+      const dd = Math.hypot(car.x - p.x, car.y - p.y);
+      if (dd < bestD) {
+        bestD = dd;
+        best = car;
+      }
+    }
+    if (best) {
+      const dx = best.x - p.x;
+      const dy = best.y - p.y;
+      const len = Math.hypot(dx, dy) || 1;
+      controls.mx = dx / len;
+      controls.my = dy / len;
+      if (bestD < 46) controls.interact = true;
+    }
   }
-  game.cam.x = p.x - 640;
-  game.cam.y = p.y - 360;
-  game.clampCamera();
-  window.__SHOT_READY = true;
+  return controls;
+}
+
+/**
+ * Set `world` to the named scene (start, play or end; any other name is start) and return the
+ * screen to draw over it.
+ */
+export function stageShot(name, world) {
+  world.reset();
+  const state = world.state;
+  if (name !== 'play' && name !== 'end') {
+    for (let i = 0; i < START_SECONDS / STEP; i += 1) {
+      world.step(STEP, { mx: 0, my: 0, throttle: 0, steer: 0, sprint: false, firing: false, interact: false, aimX: 0, aimY: 0 }, true);
+    }
+    return { screen: SCREEN_TITLE };
+  }
+  const seconds = name === 'end' ? END_SECONDS : PLAY_SECONDS;
+  let over = null;
+  for (let i = 0; i < seconds / STEP; i += 1) {
+    const events = world.step(STEP, autopilot(state), false);
+    if (events & EVENT_WASTED) {
+      over = SCREEN_WASTED;
+      break;
+    }
+    if (events & EVENT_BUSTED) {
+      over = SCREEN_BUSTED;
+      break;
+    }
+  }
+  if (name === 'end') {
+    // The end scene must show a game-over screen: if the autopilot survived, wreck it.
+    if (!over) {
+      state.player.health = 0;
+      over = SCREEN_WASTED;
+    }
+    return { screen: over };
+  }
+  return { screen: SCREEN_PLAY };
 }
